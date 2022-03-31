@@ -32,16 +32,27 @@
         />
       </p>
     </div>
-    <canvas
-      id="board"
-      class="canvas"
-      :width="data.clientWidth"
-      :height="data.clientHeight"
+    <div
+      style="position: relative;"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
       @mouseleave="onMouseUp"
-    />
+    >
+      <canvas
+        id="board"
+        style="position: absolute; left: 50%; transform: translate(-50%, 0);"
+        class="canvas"
+        :width="data.clientWidth"
+        :height="data.clientHeight"
+      />
+      <canvas
+        id="board2"
+        style="position: absolute; left: 50%; transform: translate(-50%, 0);"
+        :width="data.clientWidth"
+        :height="data.clientHeight"
+      />
+    </div>
   </div>
 </template>
 
@@ -66,21 +77,73 @@ class TileSet {
    * 指定されたキャンバスのコンテキストに地図タイルを描画する.
    * @param context 
    */
-  draw(context: CanvasRenderingContext2D, numOfRowTiles: number, numOfColTiles: number) {
-    const x = Math.floor(Math.pow(2, data.zoom) * xr.value)
-    const y = Math.floor(Math.pow(2, data.zoom) * yr.value)
-    const px = Math.floor(this.tileSize * Math.pow(2, data.zoom) * xr.value) % this.tileSize
-    const py = Math.floor(this.tileSize * Math.pow(2, data.zoom) * yr.value) % this.tileSize
-    for (let i = -Math.floor(numOfRowTiles / 2 + 1); i < Math.floor(numOfRowTiles / 2 + 2); i++) {
-      for (let j = -Math.floor(numOfColTiles / 2 + 1); j < Math.floor(numOfColTiles / 2 + 2); j++) {
-        this.getTileAt(data.zoom, x + i, y + j)
+  draw(context: CanvasRenderingContext2D, numOfRowTiles: number, numOfColTiles: number, ctx2: CanvasRenderingContext2D) {
+    const tileCoord = this.toTileCoordinate(
+      this.tileSize,
+      data.zoom,
+      data.longitude,
+      data.latitude
+    )
+    const drawRange = {
+      halfNumOfRowTiles: Math.floor((numOfRowTiles + 1) / 2),
+      halfNumOfColTIles: Math.floor((numOfColTiles + 1) / 2),
+    }
+    const offsets = {
+      x: -tileCoord.px + data.clientWidth / 2,
+      y: -tileCoord.py + data.clientHeight / 2,
+    }
+    for (let i = -drawRange.halfNumOfRowTiles; i <= drawRange.halfNumOfRowTiles; i++) {
+      for (let j = -drawRange.halfNumOfColTIles; j <= drawRange.halfNumOfColTIles; j++) {
+        this.getTileAt(data.zoom, tileCoord.x + i, tileCoord.y + j)
           .then(chara => context.drawImage(
             chara,
-            this.tileSize * i - px + data.clientWidth / 2,
-            this.tileSize * j - py + data.clientHeight / 2
+            this.tileSize * i + offsets.x,
+            this.tileSize * j + offsets.y
           ))
       }
     }
+
+    const coord1 = {
+      lon: 139.5146546,
+      lat: 35.4238236,
+    }
+    const tilecoord1 = this.toTileCoordinate(this.tileSize, data.zoom, coord1.lon, coord1.lat)
+    const diffs = {
+      x: tilecoord1.x - tileCoord.x,
+      y: tilecoord1.y - tileCoord.y,
+    }
+
+    ctx2.clearRect(0, 0, data.clientWidth, data.clientHeight)
+    ctx2.beginPath()
+    ctx2.moveTo(0, data.clientHeight / 2)
+    ctx2.lineTo(data.clientWidth, data.clientHeight / 2)
+    ctx2.moveTo(data.clientWidth / 2, 0)
+    ctx2.lineTo(data.clientWidth / 2, data.clientHeight)
+    ctx2.stroke()
+    if (Math.abs(tilecoord1.x - tileCoord.x) <= drawRange.halfNumOfRowTiles && Math.abs(tilecoord1.y - tileCoord.y) <= drawRange.halfNumOfColTIles) {
+      ctx2.beginPath()
+      ctx2.arc(
+        this.tileSize * (tilecoord1.x - tileCoord.x) + tilecoord1.px - tileCoord.px + data.clientWidth / 2,
+        this.tileSize * (tilecoord1.y - tileCoord.y) + tilecoord1.py - tileCoord.py + data.clientHeight / 2,
+        5,
+        0,
+        Math.PI * 2,
+        true
+      )
+      ctx2.stroke()
+    }
+  }
+
+  toTileCoordinate(tileSize: number, zoom: number, longitude: number, latitude: number) {
+    const xr = (180 + longitude) / 360
+    const yr = 0.5 - 0.5 * Math.log(Math.tan(Math.PI / 4 + latitude * Math.PI / 360)) / Math.PI
+    const x = Math.floor(Math.pow(2, zoom) * xr)
+    const y = Math.floor(Math.pow(2, zoom) * yr)
+    const px = Math.floor(tileSize * Math.pow(2, zoom) * xr) % tileSize
+    const py = Math.floor(tileSize * Math.pow(2, zoom) * yr) % tileSize
+    const xp = tileSize * Math.pow(2, zoom) * xr
+    const yp = tileSize * Math.pow(2, zoom) * yr
+    return { x, y, px, py, xp, yp }
   }
 
   /**
@@ -137,8 +200,8 @@ const data: UnwrapNestedRefs<{
   zoom: 13,
   longitude: 139.7673068,
   latitude: 35.6809591,
-  clientWidth: 256 * 3,
-  clientHeight: 256 * 2,
+  clientWidth: 256 * 3.5,
+  clientHeight: 256 * 1.5,
 })
 
 /** 世界地図上の位置.  */
@@ -159,11 +222,21 @@ const tileSet = new TileSet(
 
 /** キャンバスのコンテキスト */
 let context: undefined | CanvasRenderingContext2D = undefined
+let ctx2: undefined | CanvasRenderingContext2D = undefined
 
 /** ドラッグ中のマウスイベントオブジェクト */
 let dragged: any = undefined
 
 onMounted(() => {
+  const board2 = <HTMLCanvasElement>document.querySelector("#board2")
+  ctx2 = <CanvasRenderingContext2D>board2.getContext("2d")
+  // ctx2.beginPath()
+  // ctx2.moveTo(0, data.clientHeight / 2)
+  // ctx2.lineTo(data.clientWidth, data.clientHeight / 2)
+  // ctx2.moveTo(data.clientWidth / 2, 0)
+  // ctx2.lineTo(data.clientWidth / 2, data.clientHeight)
+  // ctx2.stroke()
+
   const board = <HTMLCanvasElement>document.querySelector("#board")
   context = <CanvasRenderingContext2D>board.getContext("2d")
   new Promise((resolve, reject) =>
@@ -179,12 +252,12 @@ onMounted(() => {
     console.log(error)
   }).then(() => {
     // クライアントのGPS座標が取得できればそれを、そうでなければデフォルトの座標を描画する.
-    tileSet.draw(context!, numOfRowTiles.value, numOfColTiles.value)
+    tileSet.draw(context!, numOfRowTiles.value, numOfColTiles.value, ctx2!)
   })
 })
 
 const drawMap = () => {
-  tileSet.draw(context!, numOfRowTiles.value, numOfColTiles.value)
+  tileSet.draw(context!, numOfRowTiles.value, numOfColTiles.value, ctx2!)
 }
 
 const onMouseDown = (event: MouseEvent) => {
@@ -205,7 +278,7 @@ const onMouseUp = (event: MouseEvent) => {
 const translateImage = (dx: number, dy: number) => {
   data.longitude += 360 / tileSet.tileSize / Math.pow(2, data.zoom) * dx
   data.latitude += 360 / tileSet.tileSize / Math.pow(2, data.zoom) * dy * Math.cos(data.latitude * Math.PI / 180)
-  tileSet.draw(context!, numOfRowTiles.value, numOfColTiles.value)
+  tileSet.draw(context!, numOfRowTiles.value, numOfColTiles.value, ctx2!)
 }
 
 </script>
